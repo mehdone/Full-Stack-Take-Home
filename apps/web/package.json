@@ -1,0 +1,14 @@
+{
+  "name": "@highwood/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@highwood/contracts": "workspace:*"
+  }
+}

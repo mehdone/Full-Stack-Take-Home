@@ -17,19 +17,65 @@ services:
       timeout: 3s
       retries: 20
 
-  # Optional: candidates can choose to use it for idempotency keys, caching, etc.
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: emissions_redis
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    command: ["redis-server", "--appendonly", "no"]
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--activedefrag"
+      - "yes"
+      - "--active-defrag-cycle-min"
+      - "5"
+      - "--active-defrag-cycle-max"
+      - "25"
+      - "--active-defrag-ignore-bytes"
+      - "100mb"
+      - "--active-defrag-threshold-lower"
+      - "10"
+    volumes:
+      - emissions_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 20
+
+  kafka:
+    image: apache/kafka:4.2.0
+    container_name: emissions_kafka
+    restart: unless-stopped
+    environment:
+      # KRaft single-node (controller + broker on one process)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Required for single-broker dev: internal topics can't replicate beyond RF=1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - emissions_kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   # Optional: DB admin UI for reviewers/candidates. Safe to keep.
   # If you don't want extra surface area, remove this service.
@@ -47,5 +93,22 @@ services:
         condition: service_healthy
     profiles: ["tools"]
 
+  # Optional: Kafka UI for reviewers/candidates.
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: emissions_kafka_ui
+    restart: unless-stopped
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "${KAFKA_UI_PORT:-8080}:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    profiles: ["tools"]
+
 volumes:
   emissions_pg_data:
+  emissions_redis_data:
+  emissions_kafka_data:

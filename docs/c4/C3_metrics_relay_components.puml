@@ -1,0 +1,30 @@
+@startuml C3_MetricsRelay_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: Metrics Relay container (apps/metrics-relay)
+
+ContainerDb_Ext(postgres, "PostgreSQL", "metrics_outbox, system_alerts")
+ContainerDb_Ext(redis, "Redis", "metrics:<site_id> HASH (per-(year,month) running sums)")
+
+Container_Boundary(metrics_relay, "Metrics Relay (NestJS standalone)") {
+
+  Component(relay_svc, "MetricsRelayService", "OnModuleInit / setInterval poller", "Per tick (single DB tx): SELECT metrics_outbox WHERE delivered_at IS NULL AND available_at <= now() FOR UPDATE SKIP LOCKED LIMIT N. For each row: EVAL the SETNX-guarded Lua script, then mark delivered_at or apply exponential-backoff + jitter on failure. On exhaustion: INSERT system_alerts (metrics_outbox_exhausted) and freeze the row.")
+
+  Component(health_ctl, "HealthController", "NestJS Controller", "GET /health — DB + Redis readiness (port 4103).")
+
+  Component(db_client, "DB_CLIENT", "Drizzle / postgres-js", "Shared Drizzle client.")
+
+  Component(redis_client, "REDIS_CLIENT", "ioredis", "Single Redis client with the metricsApplyIncrement Lua script registered via defineCommand. The script does SETNX applied:metrics_outbox:<id>; on first sight: EXPIRE the guard, HINCRBYFLOAT metrics:<site_id> <yyyymm> <delta_kg>, HEXPIRE the field — atomic. SETNX guard makes HINCRBYFLOAT exactly-once under at-least-once relay delivery.")
+
+  Component(config_svc, "AppConfigService", "Zod-validated env", "DATABASE_URL, REDIS_URL, pollIntervalMs, batchSize, maxAttempts, backoffBaseSeconds, backoffCapSeconds, fieldTtlSeconds (90d), appliedTtlSeconds (7d).")
+}
+
+Rel(relay_svc, db_client, "SELECT … FOR UPDATE SKIP LOCKED; UPDATE delivered_at / attempts / available_at")
+Rel(relay_svc, redis_client, "metricsApplyIncrement(appliedKey, hashKey, yyyymm, delta_kg, …) — SETNX-guarded Lua")
+Rel(relay_svc, db_client, "On exhaustion: INSERT system_alerts (metrics_outbox_exhausted) and freeze row")
+
+Rel(db_client, postgres, "TCP / SQL")
+Rel(redis_client, redis, "RESP (EVAL)")
+
+SHOW_LEGEND()
+@enduml

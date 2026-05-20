@@ -14,6 +14,7 @@ standard library (loaded over HTTPS via `!include`); no local install required.
 | `C3_api_components.puml`            | Component| Inside `apps/api` (NestJS HTTP API)        |
 | `C3_consumer_components.puml`       | Component| Inside `apps/consumer` (Kafka worker)      |
 | `C3_outbox_relay_components.puml`   | Component| Inside `apps/outbox-relay`                 |
+| `C3_metrics_relay_components.puml`  | Component| Inside `apps/metrics-relay` (Redis sum writer) |
 | `C3_system_alerts_components.puml`  | Component| Inside `apps/system-alerts`                |
 | `C3_alerting_components.puml`       | Component| Inside `apps/alerting` (HTTP sink)         |
 | `C3_web_components.puml`            | Component| Inside `apps/web` (Next.js dashboard)      |

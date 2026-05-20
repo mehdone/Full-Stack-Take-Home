@@ -12,19 +12,21 @@ System_Boundary(platform, "Emissions Data Platform") {
 
   Container(api, "API", "NestJS 11 / Node.js / Drizzle", "POST /sites, POST /ingest, GET /sites, GET /sites/:slug/metrics, GET /health. Owns the response envelope, request validation and the ingest hot path (Redis dedupe + Kafka produce).")
 
-  Container(consumer, "Ingest Consumer", "NestJS standalone / kafkajs / Drizzle", "Consumes the ingest topic, persists measurements + outbox row atomically, marks monthly aggregates stale, writes system_alerts on data-integrity gaps.")
+  Container(consumer, "Ingest Consumer", "NestJS standalone / kafkajs / Drizzle", "Consumes the ingest topic, persists measurements + outbox row + metrics_outbox row atomically, marks past-month aggregates stale (site-local calendar), writes system_alerts on data-integrity gaps.")
 
   Container(outbox_relay, "Outbox Relay", "NestJS standalone / Drizzle", "Polls outbox FOR UPDATE SKIP LOCKED; POSTs each row to the alerting receiver; tracks attempts and backoff; escalates to system_alerts on exhaustion.")
+
+  Container(metrics_relay, "Metrics Relay", "NestJS standalone / Drizzle / ioredis", "Polls metrics_outbox FOR UPDATE SKIP LOCKED; applies SETNX-guarded HINCRBYFLOAT to the per-site Redis hash (current-month sums) via Lua. Exactly-once application under at-least-once delivery; escalates to system_alerts on exhaustion.")
 
   Container(system_alerts_relay, "System-Alerts Relay", "NestJS standalone / Drizzle", "Same shape as outbox relay but scans system_alerts; on exhaustion logs and freezes the row (no recursive system_alerts write).")
 
   Container(alerting, "Alerting Receiver", "NestJS 11 / HTTP", "POST /alerts/business (LRU-deduped by event_type:batch_id) and POST /alerts/system. Stand-in for any external alert pipeline.")
 
-  ContainerDb(postgres, "PostgreSQL", "Postgres 16", "sites, site_emission_points, measurements (RANGE-partitioned by month), site_monthly_emissions, outbox, system_alerts.")
+  ContainerDb(postgres, "PostgreSQL", "Postgres 16", "sites, site_emission_points, measurements (RANGE-partitioned by month), site_monthly_emissions, outbox, metrics_outbox, system_alerts.")
 
-  ContainerDb(redis, "Redis", "Redis 7.4", "sites:valid SET (cache-as-authority for site slug validation); ingest:dedupe:<slug> HASH (edge dedupe by batch_id).")
+  ContainerDb(redis, "Redis", "Redis 7.4", "sites:valid SET (cache-as-authority for site slug validation); ingest:dedupe:<slug> HASH (edge dedupe by batch_id); metrics:<site_id> HASH (per-(year,month) running emissions, kept coherent by metrics-relay).")
 
-  ContainerQueue(kafka, "Kafka", "Apache Kafka 4.2 (KRaft)", "ingest.batches topic — partitioned by site_slug to serialise per-site work to a single consumer instance.")
+  ContainerQueue(kafka, "Kafka", "Apache Kafka 4.2 (KRaft)", "emissions.ingest.v1 topic — partitioned by site_slug to serialise per-site work to a single consumer instance.")
 }
 
 System_Ext(alerting_ext, "External Alerting Pipeline", "Conceptual downstream — represented by the in-repo Alerting Receiver.")
@@ -35,13 +37,16 @@ Rel(device, api, "POST /ingest (retried with stable batch_id)", "HTTPS / JSON")
 
 Rel(api, redis, "SISMEMBER sites:valid; HSETNX ingest:dedupe:<slug>", "RESP")
 Rel(api, postgres, "INSERT sites; site validation fallback (when Redis is down)", "TCP / SQL")
-Rel(api, kafka, "Produce to ingest.batches keyed by site_slug", "TCP")
+Rel(api, kafka, "Produce to emissions.ingest.v1 keyed by site_slug", "TCP")
 
-Rel(consumer, kafka, "Consume ingest.batches", "TCP")
-Rel(consumer, postgres, "BEGIN; INSERT measurements ON CONFLICT DO NOTHING; UPSERT site_monthly_emissions; INSERT outbox; COMMIT", "TCP / SQL")
+Rel(consumer, kafka, "Consume emissions.ingest.v1", "TCP")
+Rel(consumer, postgres, "BEGIN; INSERT measurements ON CONFLICT DO NOTHING; UPSERT site_monthly_emissions (past months only, site-local); INSERT outbox; INSERT metrics_outbox; COMMIT", "TCP / SQL")
 
 Rel(outbox_relay, postgres, "SELECT ... FOR UPDATE SKIP LOCKED outbox; UPDATE delivered_at / attempts", "TCP / SQL")
 Rel(outbox_relay, alerting, "POST /alerts/business (X-Idempotency-Key = outbox_id)", "HTTP / JSON")
+
+Rel(metrics_relay, postgres, "SELECT ... FOR UPDATE SKIP LOCKED metrics_outbox; UPDATE delivered_at / attempts", "TCP / SQL")
+Rel(metrics_relay, redis, "EVAL SETNX-guarded Lua: HINCRBYFLOAT metrics:<site_id> <yyyymm>; HEXPIRE field", "RESP")
 
 Rel(system_alerts_relay, postgres, "SELECT ... FOR UPDATE SKIP LOCKED system_alerts; UPDATE delivered_at / attempts", "TCP / SQL")
 Rel(system_alerts_relay, alerting, "POST /alerts/system (X-Idempotency-Key = system_alert_id)", "HTTP / JSON")

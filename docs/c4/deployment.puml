@@ -21,10 +21,13 @@ Deployment_Node(host, "Developer host", "macOS / Linux") {
       Container(cons_inst, "Ingest Consumer", "No HTTP port")
     }
     Deployment_Node(n_relay,  "emissions_outbox_relay",   "Node 22 / NestJS standalone") {
-      Container(relay_inst, "Outbox Relay", "No HTTP port")
+      Container(relay_inst, "Outbox Relay", "Health port 4101")
     }
     Deployment_Node(n_sys,    "emissions_system_alerts",  "Node 22 / NestJS standalone") {
-      Container(sys_inst, "System-Alerts Relay", "No HTTP port")
+      Container(sys_inst, "System-Alerts Relay", "Health port 4102")
+    }
+    Deployment_Node(n_metrics_relay, "emissions_metrics_relay", "Node 22 / NestJS standalone") {
+      Container(metrics_relay_inst, "Metrics Relay", "Health port 4103")
     }
     Deployment_Node(n_alert,  "emissions_alerting",       "Node 22 / NestJS") {
       Container(alert_inst, "Alerting Receiver", "Port 4100")
@@ -53,6 +56,8 @@ Rel(relay_inst,  pg_inst,    "SQL", "TCP 5432")
 Rel(relay_inst,  alert_inst, "HTTP", "alerting:4100")
 Rel(sys_inst,    pg_inst,    "SQL", "TCP 5432")
 Rel(sys_inst,    alert_inst, "HTTP", "alerting:4100")
+Rel(metrics_relay_inst, pg_inst,    "SQL", "TCP 5432")
+Rel(metrics_relay_inst, redis_inst, "RESP", "TCP 6379")
 
 SHOW_LEGEND()
 @enduml

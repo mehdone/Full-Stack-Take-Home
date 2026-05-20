@@ -3,20 +3,20 @@
 
 title C3 — Components: Ingest Consumer container (apps/consumer)
 
-ContainerQueue_Ext(kafka, "Kafka", "ingest.batches topic")
+ContainerQueue_Ext(kafka, "Kafka", "emissions.ingest.v1 topic")
 ContainerDb_Ext(postgres, "PostgreSQL")
 
 Container_Boundary(consumer, "Ingest Consumer (NestJS standalone)") {
 
-  Component(kafka_consumer_svc, "KafkaConsumerService", "kafkajs consumer", "Subscribes to ingest.batches; for each message calls IngestHandlerService.handle; commits offsets after successful persistence.")
+  Component(kafka_consumer_svc, "KafkaConsumerService", "kafkajs consumer", "Subscribes to emissions.ingest.v1; for each message calls IngestHandlerService.handle; commits offsets after successful persistence.")
 
-  Component(ingest_handler, "IngestHandlerService", "NestJS Provider", "Pre-tx: resolves site_id by slug; resolves emission_point codes via in-process cache → batched SELECT → INSERT ON CONFLICT DO NOTHING RETURNING → re-SELECT. Tx: bulk INSERT measurements ON CONFLICT DO NOTHING; UPSERT site_monthly_emissions stale=true for affected months; INSERT outbox row; COMMIT.")
+  Component(ingest_handler, "IngestHandlerService", "NestJS Provider", "Pre-tx: resolves site_id + timezone by slug; computes site-local 'now' (year, month); resolves emission_point codes via in-process cache → batched SELECT → INSERT ON CONFLICT DO NOTHING RETURNING → re-SELECT. Tx: bulk INSERT measurements ON CONFLICT DO NOTHING; UPSERT site_monthly_emissions stale=true only for PAST site-local months; INSERT outbox row; INSERT metrics_outbox rows (one per affected site-local (year, month) with delta_kg); COMMIT.")
 
   Component(system_alerts_svc, "SystemAlertsService", "NestJS Provider", "Inserts rows into the system_alerts table (e.g. unknown_site_in_consumer) for data-integrity gaps.")
 
   Component(db_client, "DB_CLIENT", "Drizzle / postgres-js", "Shared Drizzle client.")
 
-  Component(site_cache, "siteIdCache", "Map<string,bigint>", "Process-local slug→site_id cache (sites are append-only).")
+  Component(site_cache, "siteIdCache", "Map<string, { id: bigint; timezone: string }>", "Process-local slug→{site_id, timezone} cache (sites are append-only). Timezone is used for site-local calendar bucketing in stale-flag + metrics_outbox writes.")
   Component(ep_cache, "emissionPointCache", "Map<string,bigint>", "Process-local (siteId,code)→id cache (emission points are append-only).")
 
   Component(config_svc, "AppConfigService", "Zod-validated env", "Validates DATABASE_URL, KAFKA_BROKERS, consumer group id, ingest topic.")
@@ -25,10 +25,10 @@ Container_Boundary(consumer, "Ingest Consumer (NestJS standalone)") {
 Rel(kafka, kafka_consumer_svc, "Fetch records (per-partition order preserved)")
 Rel(kafka_consumer_svc, ingest_handler, "handle(KafkaIngestMessage)")
 
-Rel(ingest_handler, site_cache, "lookup / populate")
+Rel(ingest_handler, site_cache, "lookup / populate {id, timezone}")
 Rel(ingest_handler, ep_cache, "lookup / populate")
-Rel(ingest_handler, db_client, "Resolve site_id + emission points (pre-tx)")
-Rel(ingest_handler, db_client, "Tight tx: measurements + monthly stale + outbox")
+Rel(ingest_handler, db_client, "Resolve site_id + timezone + emission points (pre-tx)")
+Rel(ingest_handler, db_client, "Tight tx: measurements + past-month stale flags + outbox + metrics_outbox")
 Rel(ingest_handler, system_alerts_svc, "On unknown site → write system_alert")
 
 Rel(system_alerts_svc, db_client, "INSERT system_alerts")

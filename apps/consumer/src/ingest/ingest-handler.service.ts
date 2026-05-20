@@ -2,6 +2,7 @@ import type { IngestBatchInput, MeasurementInput } from "@highwood/contracts";
 import type { DbClient } from "@highwood/db";
 import {
   measurements,
+  metricsOutbox,
   outbox,
   siteEmissionPoints,
   siteMonthlyEmissions,
@@ -79,13 +80,14 @@ export class IngestHandlerService {
   private readonly logger = new Logger(IngestHandlerService.name);
 
   /**
-   * Process-local cache: site_slug → site_id.
+   * Process-local cache: site_slug → { id, timezone }.
    *
-   * Sites are append-only in this schema (no delete path), so cached ids
+   * Sites are append-only in this schema (no delete path), so cached entries
    * cannot become stale within a process lifetime. Warms naturally from
-   * query traffic.
+   * query traffic. `timezone` is the site's IANA name, used for site-local
+   * calendar bucketing in `markMonthsStale`.
    */
-  private readonly siteIdCache = new Map<string, bigint>();
+  private readonly siteIdCache = new Map<string, { id: bigint; timezone: string }>();
 
   /**
    * Process-local cache: `${siteId}:${code}` → emission_point_id.
@@ -104,10 +106,10 @@ export class IngestHandlerService {
   async handle(msg: KafkaIngestMessage): Promise<IngestResult> {
     const { batch_id, site_slug, measurements: inputMeasurements, received_at_ms } = msg;
 
-    let siteId = this.siteIdCache.get(site_slug);
-    if (siteId === undefined) {
+    let cached = this.siteIdCache.get(site_slug);
+    if (cached === undefined) {
       const siteRows = await this.dbClient.db
-        .select({ id: sites.id })
+        .select({ id: sites.id, timezone: sites.timezone })
         .from(sites)
         .where(eq(sites.slug, site_slug))
         .limit(1);
@@ -133,9 +135,17 @@ export class IngestHandlerService {
         };
       }
 
-      siteId = siteRows[0].id;
-      this.siteIdCache.set(site_slug, siteId);
+      cached = { id: siteRows[0].id, timezone: siteRows[0].timezone };
+      this.siteIdCache.set(site_slug, cached);
     }
+    const siteId = cached.id;
+    const siteTimezone = cached.timezone;
+
+    // "Now" captured once per batch, in the site's local calendar. Used to skip
+    // the stale-flag UPSERT for measurements that fall in the current site-local
+    // month — those land in the live-SUM portion of `GET /metrics` and have no
+    // cache row to invalidate yet.
+    const nowYearMonth = siteLocalYearMonth(new Date(), siteTimezone);
 
     const emissionPointMap = await this.resolveEmissionPoints(siteId, inputMeasurements);
 
@@ -175,7 +185,8 @@ export class IngestHandlerService {
         .toFixed(6);
 
       if (insertedRows.length > 0) {
-        await this.markMonthsStale(tx, siteId, insertedRows);
+        await this.markMonthsStale(tx, siteId, siteTimezone, nowYearMonth, insertedRows);
+        await this.writeMetricsOutbox(tx, siteId, siteTimezone, insertedRows);
       }
 
       const persistedAtMs = Date.now();
@@ -289,31 +300,40 @@ export class IngestHandlerService {
   }
 
   /**
-   * Mark each affected (year, month) pair stale in site_monthly_emissions.
+   * Mark each affected past (year, month) pair stale in site_monthly_emissions.
    *
-   * Derives UTC year/month from the `recordedAt` date of actually-inserted rows,
-   * deduplicates, then upserts with `stale = true`. This guarantees the hourly
-   * recompute job (Phase 5) picks up all affected aggregates.
+   * Year/month are derived in the **site's local calendar** (IANA timezone),
+   * not UTC — the cache row represents a local calendar month for regulatory
+   * reporting. The current site-local month is **skipped**: it has no cache
+   * row yet (the ETL creates it on month close), and `GET /metrics` reads the
+   * current month live from `measurements`, so flagging it would be wasted
+   * write amplification.
+   *
+   * Only measurements whose site-local (year, month) is strictly less than
+   * `nowYearMonth` produce an UPSERT. The remaining set is sorted so concurrent
+   * writers (e.g. a future ETL recompute job) acquire month-row locks in the
+   * same order — deterministic lock ordering = no cross-feature deadlocks.
    */
   private async markMonthsStale(
     tx: Parameters<Parameters<DbClient["db"]["transaction"]>[0]>[0],
     siteId: bigint,
+    siteTimezone: string,
+    nowYearMonth: { year: number; month: number },
     insertedRows: Array<{ recordedAt: Date; value: string }>,
   ): Promise<void> {
-    // Collect distinct (year, month) pairs from inserted rows' UTC timestamps.
+    // Collect distinct site-local (year, month) pairs, keeping only those that
+    // are strictly past relative to the site's local "now."
     const monthSet = new Map<string, { year: number; month: number }>();
     for (const row of insertedRows) {
-      const year = row.recordedAt.getUTCFullYear();
-      const month = row.recordedAt.getUTCMonth() + 1; // getUTCMonth is 0-indexed
+      const { year, month } = siteLocalYearMonth(row.recordedAt, siteTimezone);
+      if (!isStrictlyBefore({ year, month }, nowYearMonth)) continue;
       const key = `${year}-${month}`;
       if (!monthSet.has(key)) {
         monthSet.set(key, { year, month });
       }
     }
+    if (monthSet.size === 0) return;
 
-    // Sort (year, month) so concurrent writers (e.g., the ETL hourly recompute
-    // job in Phase 5) and this consumer acquire locks in the same order across
-    // months. Deterministic lock ordering = no cross-feature deadlocks.
     const orderedMonths = [...monthSet.values()].sort((a, b) =>
       a.year !== b.year ? a.year - b.year : a.month - b.month,
     );
@@ -339,4 +359,79 @@ export class IngestHandlerService {
         });
     }
   }
+
+  /**
+   * Write one `metrics_outbox` row per distinct site-local (year, month) in the
+   * just-inserted rows. The delta is the sum of `value` for the rows in that
+   * month. The metrics-relay picks these up and applies HINCRBYFLOAT to a
+   * per-site Redis hash via a SETNX-guarded Lua script (exactly-once
+   * application under at-least-once relay delivery).
+   *
+   * No filtering by past/current month here: the proposal explicitly accepts
+   * writing past-month fields too. Past-month fields land in the hash
+   * harmlessly — the read path only consults the current month, but
+   * suppressing past-month writes would add per-row branching for no benefit.
+   *
+   * Numeric precision: deltas are summed with `Number` and serialized back via
+   * `toFixed(6)` to match `numeric(18, 6)`. The relay's HINCRBYFLOAT is itself
+   * IEEE-754; total drift across a month is sub-picogram for realistic
+   * emissions ranges. See docs/architecture/metrics-cache.md §5 for the
+   * precision analysis.
+   */
+  private async writeMetricsOutbox(
+    tx: Parameters<Parameters<DbClient["db"]["transaction"]>[0]>[0],
+    siteId: bigint,
+    siteTimezone: string,
+    insertedRows: Array<{ recordedAt: Date; value: string }>,
+  ): Promise<void> {
+    // Sum values by site-local (year, month).
+    const sums = new Map<string, { year: number; month: number; total: number }>();
+    for (const row of insertedRows) {
+      const { year, month } = siteLocalYearMonth(row.recordedAt, siteTimezone);
+      const key = `${year}-${month}`;
+      const existing = sums.get(key);
+      const v = Number.parseFloat(row.value);
+      if (existing) {
+        existing.total += v;
+      } else {
+        sums.set(key, { year, month, total: v });
+      }
+    }
+    if (sums.size === 0) return;
+
+    // Deterministic order keeps lock-acquisition consistent under concurrent
+    // writers (paranoid; this is an INSERT-only table with a FK to sites).
+    const rows = [...sums.values()]
+      .sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month))
+      .map(({ year, month, total }) => ({
+        siteId,
+        year,
+        month,
+        deltaKg: total.toFixed(6),
+      }));
+
+    await tx.insert(metricsOutbox).values(rows);
+  }
+}
+
+/**
+ * Convert a UTC `Date` instant to a `{ year, month }` pair in an IANA timezone.
+ * Uses Node's built-in `Intl.DateTimeFormat` — no external dep.
+ */
+function siteLocalYearMonth(instant: Date, timezone: string): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(instant);
+  const year = Number(parts.find((p) => p.type === "year")?.value);
+  const month = Number(parts.find((p) => p.type === "month")?.value);
+  return { year, month };
+}
+
+function isStrictlyBefore(
+  a: { year: number; month: number },
+  b: { year: number; month: number },
+): boolean {
+  return a.year !== b.year ? a.year < b.year : a.month < b.month;
 }

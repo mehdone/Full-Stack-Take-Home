@@ -24,15 +24,8 @@ export class IngestService {
 
   async ingest(batch: IngestBatchInput): Promise<IngestAccepted> {
     const { batch_id, site_slug, measurements } = batch;
-
-    // ------------------------------------------------------------------
-    // 1. Site validity check — Redis SISMEMBER with DB fallback
-    // ------------------------------------------------------------------
     await this.assertSiteValid(site_slug);
 
-    // ------------------------------------------------------------------
-    // 2. Batch dedupe — Lua HSETNX + HEXPIRE
-    // ------------------------------------------------------------------
     const dedupeKey = `ingest:dedupe:${site_slug}`;
     const ttl = this.config.batchDedupeTtlSeconds;
     let isFirstSight: boolean;
@@ -70,9 +63,6 @@ export class IngestService {
       };
     }
 
-    // ------------------------------------------------------------------
-    // 3. Produce to Kafka
-    // ------------------------------------------------------------------
     const receivedAtMs = Date.now();
 
     try {
@@ -115,10 +105,6 @@ export class IngestService {
       measurements_received: measurements.length,
     };
   }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
 
   /**
    * Assert the site slug is valid.

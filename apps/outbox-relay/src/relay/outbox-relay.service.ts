@@ -84,10 +84,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     this.logger.log({ event: "outbox_relay.stopped" });
   }
 
-  // ---------------------------------------------------------------------------
-  // Poll tick
-  // ---------------------------------------------------------------------------
-
   private async tick(): Promise<void> {
     const batchSize = this.config.batchSize;
 
@@ -120,10 +116,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       }
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // Per-row delivery
-  // ---------------------------------------------------------------------------
 
   private async deliverRow(
     tx: Parameters<Parameters<DbClient["db"]["transaction"]>[0]>[0],
@@ -182,10 +174,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Failure handling — backoff + exhaustion
-  // ---------------------------------------------------------------------------
-
   private async handleFailure(
     tx: Parameters<Parameters<DbClient["db"]["transaction"]>[0]>[0],
     row: OutboxRow,
@@ -231,7 +219,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         UPDATE outbox
         SET attempts    = ${newAttempts},
             last_error  = ${errMsg},
-            available_at = now() + interval '1 year'
+            available_at = now() + interval '1 day'
         WHERE id = ${id}
       `);
 
@@ -256,10 +244,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     `);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Internal row shape returned by raw SQL query
-// ---------------------------------------------------------------------------
 
 interface OutboxRow {
   id: bigint | number;

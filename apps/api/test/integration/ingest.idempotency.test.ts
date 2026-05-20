@@ -52,6 +52,7 @@ import {
   countMeasurementsForSlug,
   flushRedisIngestState,
   handleDirect,
+  preflightAssertNoCompetingConsumers,
   quiesceKafka,
   readOutbox,
   startDrainPump,
@@ -73,8 +74,21 @@ describe("POST /ingest — idempotency audit", () => {
   let server: import("http").Server;
 
   beforeAll(async () => {
+    // Fail fast if another consumer (e.g. the production consumer started by
+    // `pnpm dev`) is on the ingest topic — both groups receive the message
+    // and both write to `outbox`, double-counting assertions. See helper.
+    await preflightAssertNoCompetingConsumers();
+
     app = await createTestApp();
     await app.init();
+    // Bind the HTTP server to an ephemeral port BEFORE supertest sees it.
+    // Without this, `request(server).post(...)` lazily calls `server.listen(0)`
+    // on the very first invocation — when Test 3 fires 10 `request()` calls
+    // via Promise.all, all 10 race on that lazy bind and at least one finds
+    // the listener in a transient state, surfacing as `read ECONNRESET`.
+    // Pre-binding makes the server already-listening, supertest skips the
+    // bind, and concurrent requests are race-free.
+    await app.listen(0);
     dbClient = getDbClient(app);
     redis = app.get<Redis>(REDIS_CLIENT);
     server = app.getHttpServer() as import("http").Server;
@@ -402,8 +416,22 @@ describe("POST /ingest — idempotency audit", () => {
       ).rejects.toThrow();
 
       // Rollback guarantee: zero rows landed in measurements, zero in outbox,
-      // zero in site_monthly_emissions, zero in site_emission_points (the
-      // auto-created codes were also rolled back).
+      // zero in site_monthly_emissions.
+      //
+      // NOTE on site_emission_points: emission-point resolution runs
+      // PRE-TRANSACTION by design (PLAN.md Entries 10.4–10.6 / Architecture
+      // §12.1). Emission points are append-only and the FK on measurements
+      // enforces validity at insert time, so resolving outside the tx is safe
+      // and lets steady-state batches answer from a process-local cache with
+      // zero DB calls. Consequence: a tx that aborts on the measurements
+      // insert leaves the emission_points it auto-created behind. That is
+      // intentional — they are valid rows that simply haven't been referenced
+      // by a committed measurement yet; the next retry reuses them.
+      //
+      // The atomicity boundary is therefore:
+      //   { measurements, site_monthly_emissions stale flags, outbox row,
+      //     metrics_outbox row }
+      // and NOT site_emission_points.
       const afterPoison = await countMeasurementsForSlug(dbClient, SITE_SLUG);
       expect(afterPoison.count).toBe(0);
       expect(await readOutbox(dbClient)).toHaveLength(0);
@@ -411,10 +439,14 @@ describe("POST /ingest — idempotency audit", () => {
         SELECT COUNT(*)::text AS count FROM site_monthly_emissions
       `;
       expect(Number.parseInt(monthlyRows[0]?.count ?? "0", 10)).toBe(0);
+
+      // emission_points persisted from pre-tx resolution. The poison batch
+      // referenced 2 distinct codes (VENT-1 and VENT-2 — see buildMeasurements
+      // mod-3 distribution), so we expect 2 rows.
       const epRows = await dbClient.sql<{ count: string }[]>`
         SELECT COUNT(*)::text AS count FROM site_emission_points
       `;
-      expect(Number.parseInt(epRows[0]?.count ?? "0", 10)).toBe(0);
+      expect(Number.parseInt(epRows[0]?.count ?? "0", 10)).toBe(2);
 
       // Retry the same batch_id with a clean payload via handleDirect (this
       // simulates the consumer replaying the message after a transient error

@@ -13,6 +13,19 @@ Live, interactive OpenAPI documentation is served by the API itself — start th
 
 The spec is generated from the same Zod schemas in `@highwood/contracts` that the backend validates against and the frontend consumes — request/response shapes here are guaranteed to match what the API enforces at runtime (§8.3).
 
+## Running with Docker Compose
+
+One command brings the whole platform up — infra + every app — in containers. No Node or pnpm needed on the host.
+
+```bash
+cp .env.example .env
+docker compose --profile apps up -d --build
+```
+
+Then open <http://localhost:3000/docs> (API Redoc) or <http://localhost:3001> (web dashboard).
+
+Full instructions, logs/teardown, and the host-side `pnpm dev` alternative live in [`docs/DOCKER.md`](docs/DOCKER.md) and [`docs/SETUP.md`](docs/SETUP.md).
+
 ## Table of Contents
 
 1. [Overview](#1-overview)

@@ -8,8 +8,8 @@ const bootstrapLogger = new Logger("Bootstrap");
 
 async function bootstrap(): Promise<void> {
   // No HTTP endpoint for the primary function (Redis writer). HTTP is up only
-  // for the /health endpoint that compose / orchestrators probe. Port 4102 to
-  // sit alongside outbox-relay (4101).
+  // for the /health endpoint that compose / orchestrators probe. Port 4103 to
+  // sit alongside outbox-relay (4101) and system-alerts (4102).
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
   });
@@ -18,7 +18,7 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(AppConfigService);
 
-  const healthPort = 4102;
+  const healthPort = 4103;
   await app.listen(healthPort);
 
   bootstrapLogger.log({

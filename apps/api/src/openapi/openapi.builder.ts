@@ -6,9 +6,9 @@
  */
 
 import {
-  extendZodWithOpenApi,
-  OpenApiGeneratorV3,
   OpenAPIRegistry,
+  OpenApiGeneratorV3,
+  extendZodWithOpenApi,
 } from "@asteasolutions/zod-to-openapi";
 import {
   ApiErrorSchema,
@@ -46,10 +46,7 @@ export function buildOpenApiDocument(): OpenAPIObject {
 
   // Success envelopes — registered as named components so the spec is browsable
   // rather than littered with inline anonymous shapes.
-  const siteEnv = registry.register(
-    "SiteResponseEnvelope",
-    successEnvelope(SiteResponseSchema),
-  );
+  const siteEnv = registry.register("SiteResponseEnvelope", successEnvelope(SiteResponseSchema));
   const sitesListEnv = registry.register(
     "SitesListResponseEnvelope",
     successEnvelope(SitesListResponseSchema),

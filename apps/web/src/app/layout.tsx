@@ -14,7 +14,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-xl font-semibold text-gray-900">Highwood Emissions Management</h1>
+                <h1 className="text-xl font-semibold text-gray-900">
+                  Highwood Emissions Management
+                </h1>
                 <p className="text-xs text-gray-500">Monitoring Dashboard</p>
               </div>
               <nav className="flex gap-4 text-sm">

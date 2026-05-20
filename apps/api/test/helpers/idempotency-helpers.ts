@@ -354,5 +354,65 @@ export async function bypassRedisDedupe(
   await redis.hdel(`ingest:dedupe:${siteSlug}`, batchId);
 }
 
+/**
+ * Preflight: fail fast if another Kafka consumer (e.g. the production
+ * `emissions-ingest-consumer` started by `pnpm dev`) is subscribed to the
+ * ingest topic alongside our test pump.
+ *
+ * Why: the test pump uses a fresh, unique groupId so it doesn't COLLIDE with
+ * a production consumer at the Kafka offset layer. But two distinct groups
+ * each receive a COPY of every message — both run `IngestHandlerService.handle`
+ * and both write to the `outbox` table. Assertions on `outbox.length` then
+ * double-count and the suite fails with confusing per-test errors instead of
+ * a clear "stop pnpm dev first" message.
+ *
+ * This check enumerates all consumer groups on the cluster, ignores any with
+ * the test-pump prefix or transient/dead state, and throws if anything else
+ * is alive. Cheap (~50 ms) and only runs once per suite.
+ */
+export async function preflightAssertNoCompetingConsumers(): Promise<void> {
+  const kafka = new Kafka({ clientId: "idempotency-preflight", brokers: KAFKA_BROKERS });
+  const admin: Admin = kafka.admin();
+  try {
+    await admin.connect();
+
+    const { groups } = await admin.listGroups();
+    const candidates = groups
+      .filter((g) => g.protocolType === "consumer")
+      .filter((g) => !g.groupId.startsWith("test-idempotency-"))
+      .map((g) => g.groupId);
+
+    if (candidates.length === 0) return;
+
+    // Inspect each candidate: only fail if it's actually alive AND has a
+    // member currently assigned to the ingest topic. A group with state
+    // "Empty" or "Dead" is just stale offset metadata — harmless.
+    const described = await admin.describeGroups(candidates);
+    const offenders = described.groups.filter((g) => {
+      if (g.state === "Empty" || g.state === "Dead") return false;
+      return g.members.some((m) => {
+        const meta = m.memberMetadata?.toString("binary") ?? "";
+        return meta.includes(INGEST_TOPIC);
+      });
+    });
+
+    if (offenders.length > 0) {
+      const names = offenders.map((g) => `${g.groupId} (state=${g.state})`).join(", ");
+      throw new Error(
+        `Refusing to run the idempotency suite: another consumer group is currently ` +
+          `subscribed to '${INGEST_TOPIC}' — ${names}. This is almost certainly the ` +
+          `production consumer started by 'pnpm dev'. Both groups receive a COPY of ` +
+          `every ingest message, both write to 'outbox', and assertions on outbox.length ` +
+          `then double-count. Stop 'pnpm dev' (or at least the @highwood/consumer process) ` +
+          `before running these tests.`,
+      );
+    }
+  } finally {
+    await admin.disconnect().catch(() => {
+      /* swallow */
+    });
+  }
+}
+
 export { INGEST_TOPIC, KAFKA_BROKERS };
 export type { Admin };

@@ -234,6 +234,7 @@ describe("POST /sites (Integration)", () => {
       const payload = {
         slug: "well-pad-1",
         name: "First Site",
+        country: "CA",
         latitude: 51.5,
         longitude: -114.1,
         timezone: "America/Edmonton",
@@ -249,6 +250,7 @@ describe("POST /sites (Integration)", () => {
         .send({
           slug: "well-pad-1",
           name: "Second Site (different name)",
+          country: "US",
           latitude: 50.0,
           longitude: -115.0,
           timezone: "America/Denver",

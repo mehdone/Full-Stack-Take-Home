@@ -1,0 +1,32 @@
+# Version control
+.git
+.gitignore
+
+# Node modules — reinstalled inside the image
+**/node_modules
+
+# Build artifacts — rebuilt inside the image
+**/dist
+**/.next
+
+# Test & coverage output
+**/coverage
+**/__snapshots__
+
+# Local env files — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+.DS_Store
+**/.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+
+# Docker files themselves (not needed in build context)
+**/Dockerfile
+docker-compose*.yml
+.dockerignore

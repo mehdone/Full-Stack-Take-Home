@@ -34,7 +34,7 @@ type MetricsState =
 function formatKg(value: string): string {
   const n = Number.parseFloat(value);
   if (Number.isNaN(n)) return value;
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
 export function SiteMetricsRow({ site }: Props) {

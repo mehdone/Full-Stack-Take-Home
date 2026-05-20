@@ -28,7 +28,12 @@ import {
 } from "@highwood/contracts";
 import type { ZodTypeAny } from "zod";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+// On the server, prefer INTERNAL_API_BASE_URL (e.g. http://api:3000 inside docker).
+// In the browser, fall back to NEXT_PUBLIC_API_BASE_URL (host-reachable URL).
+const API_BASE_URL =
+  (typeof window === "undefined" ? process.env.INTERNAL_API_BASE_URL : undefined) ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://localhost:3000";
 
 // ---------------------------------------------------------------------------
 // Typed error class — thrown by apiFetch on ok === false responses

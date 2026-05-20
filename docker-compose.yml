@@ -54,10 +54,11 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: controller,broker
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Two listeners: INTERNAL for other containers, EXTERNAL for the host
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       # Required for single-broker dev: internal topics can't replicate beyond RF=1
@@ -67,7 +68,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
-      - "${KAFKA_PORT:-9092}:9092"
+      - "${KAFKA_PORT:-9092}:9094"
     volumes:
       - emissions_kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -107,6 +108,139 @@ services:
       kafka:
         condition: service_healthy
     profiles: ["tools"]
+
+  # ── Application services (docker compose --profile apps up -d) ───────────────
+  # These are gated behind the "apps" profile so `pnpm infra:up` (which runs
+  # `docker compose up -d` with no profile) still brings up infra only.
+  # Reviewers who want the full stack: docker compose --profile apps up -d
+
+  alerting:
+    container_name: emissions_alerting
+    build:
+      context: .
+      dockerfile: apps/alerting/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+    ports:
+      - "4100:4100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4100/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    profiles: ["apps"]
+
+  api:
+    container_name: emissions_api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-emissions}:${POSTGRES_PASSWORD:-emissions}@postgres:5432/${POSTGRES_DB:-emissions}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    profiles: ["apps"]
+
+  web:
+    container_name: emissions_web
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # NEXT_PUBLIC_API_BASE_URL is baked in at build time; it must be reachable
+        # from the end-user's browser, so we use localhost (not the container name).
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      # Used by Server Components / RSC fetches running inside the container —
+      # the browser-facing URL (localhost:3000) doesn't resolve from in here.
+      INTERNAL_API_BASE_URL: http://api:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["apps"]
+
+  consumer:
+    container_name: emissions_consumer
+    build:
+      context: .
+      dockerfile: apps/consumer/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-emissions}:${POSTGRES_PASSWORD:-emissions}@postgres:5432/${POSTGRES_DB:-emissions}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    profiles: ["apps"]
+
+  outbox-relay:
+    container_name: emissions_outbox_relay
+    build:
+      context: .
+      dockerfile: apps/outbox-relay/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-emissions}:${POSTGRES_PASSWORD:-emissions}@postgres:5432/${POSTGRES_DB:-emissions}
+      ALERTING_URL: http://alerting:4100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      alerting:
+        condition: service_healthy
+    profiles: ["apps"]
+
+  system-alerts:
+    container_name: emissions_system_alerts
+    build:
+      context: .
+      dockerfile: apps/system-alerts/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-emissions}:${POSTGRES_PASSWORD:-emissions}@postgres:5432/${POSTGRES_DB:-emissions}
+      ALERTING_URL: http://alerting:4100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      alerting:
+        condition: service_healthy
+    profiles: ["apps"]
 
 volumes:
   emissions_pg_data:

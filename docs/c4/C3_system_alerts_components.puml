@@ -1,0 +1,25 @@
+@startuml C3_SystemAlerts_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: System-Alerts Relay container (apps/system-alerts)
+
+ContainerDb_Ext(postgres, "PostgreSQL", "system_alerts")
+Container_Ext(alerting, "Alerting Receiver", "POST /alerts/system")
+
+Container_Boundary(sysrelay, "System-Alerts Relay (NestJS standalone)") {
+
+  Component(relay_svc, "SystemAlertsRelayService", "OnModuleInit / setInterval poller", "Per tick (single DB tx): SELECT system_alerts WHERE delivered_at IS NULL AND available_at <= now() FOR UPDATE SKIP LOCKED LIMIT N. For each row: POST /alerts/system with X-Idempotency-Key = system_alert_id, then mark delivered_at or apply backoff on failure. On exhaustion, logs structured error and freezes the row — does NOT write another system_alert (would recurse).")
+
+  Component(health_ctl, "HealthController", "NestJS Controller", "GET /health.")
+
+  Component(db_client, "DB_CLIENT", "Drizzle / postgres-js", "Shared Drizzle client.")
+  Component(config_svc, "AppConfigService", "Zod-validated env", "DATABASE_URL, ALERTING_URL, pollIntervalMs, batchSize, maxAttempts, backoffBaseSeconds, backoffCapSeconds.")
+}
+
+Rel(relay_svc, db_client, "SELECT … FOR UPDATE SKIP LOCKED; UPDATE delivered_at / attempts / available_at")
+Rel(relay_svc, alerting, "POST /alerts/system (10s timeout, X-Idempotency-Key)")
+
+Rel(db_client, postgres, "TCP / SQL")
+
+SHOW_LEGEND()
+@enduml

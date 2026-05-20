@@ -1,0 +1,31 @@
+@startuml C3_OutboxRelay_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: Outbox Relay container (apps/outbox-relay)
+
+ContainerDb_Ext(postgres, "PostgreSQL", "outbox, system_alerts")
+Container_Ext(alerting, "Alerting Receiver", "POST /alerts/business")
+
+Container_Boundary(relay, "Outbox Relay (NestJS standalone)") {
+
+  Component(relay_svc, "OutboxRelayService", "OnModuleInit / setInterval poller", "Per tick (single DB tx): SELECT outbox WHERE delivered_at IS NULL AND available_at <= now() FOR UPDATE SKIP LOCKED LIMIT N. For each row: POST /alerts/business with X-Idempotency-Key = outbox_id, then mark delivered_at or apply exponential-backoff + jitter on failure.")
+
+  Component(delivered_listener, "OutboxDeliveredListener", "@OnEvent", "Subscribes to in-process outbox.delivered event for logging/metrics hooks.")
+
+  Component(health_ctl, "HealthController", "NestJS Controller", "GET /health.")
+
+  Component(db_client, "DB_CLIENT", "Drizzle / postgres-js", "Shared Drizzle client.")
+  Component(events, "EventEmitter2", "@nestjs/event-emitter", "In-process pub/sub.")
+  Component(config_svc, "AppConfigService", "Zod-validated env", "DATABASE_URL, ALERTING_URL, pollIntervalMs, batchSize, maxAttempts, backoffBaseSeconds, backoffCapSeconds.")
+}
+
+Rel(relay_svc, db_client, "SELECT … FOR UPDATE SKIP LOCKED; UPDATE delivered_at / attempts / available_at")
+Rel(relay_svc, alerting, "POST /alerts/business (10s timeout, X-Idempotency-Key)")
+Rel(relay_svc, db_client, "On exhaustion: INSERT system_alerts (outbox_delivery_exhausted) and freeze row")
+Rel(relay_svc, events, "emit outbox.delivered")
+Rel(events, delivered_listener, "outbox.delivered")
+
+Rel(db_client, postgres, "TCP / SQL")
+
+SHOW_LEGEND()
+@enduml

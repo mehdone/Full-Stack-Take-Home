@@ -1,0 +1,72 @@
+@startuml C3_API_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: API container (apps/api)
+
+Person_Ext(client, "Field Device / Dashboard")
+
+Container_Boundary(api, "API (NestJS 11)") {
+
+  Component(req_id_mw, "RequestIdMiddleware", "NestJS middleware", "Assigns/propagates X-Request-Id on every request.")
+  Component(zod_pipe, "ZodValidationPipe", "NestJS Pipe", "Validates request bodies against @highwood/contracts Zod schemas.")
+  Component(resp_interceptor, "ResponseInterceptor", "NestJS Interceptor", "Wraps handler return in the { ok: true, data } success envelope.")
+  Component(exc_filter, "AllExceptionsFilter", "NestJS Filter", "Maps thrown errors to { ok: false, error: { code, message, details, request_id } }.")
+
+  Component(sites_ctl, "SitesController", "NestJS Controller", "POST /sites; GET /sites (cursor-paginated).")
+  Component(ingest_ctl, "IngestController", "NestJS Controller", "POST /ingest.")
+  Component(metrics_ctl, "MetricsController", "NestJS Controller", "GET /sites/:slug/metrics. (Defined on SitesController.)")
+  Component(health_ctl, "HealthController", "NestJS Controller", "GET /health — DB + Redis + Kafka readiness.")
+
+  Component(sites_svc, "SitesService", "NestJS Provider", "Creates a site inside one DB transaction that also SADDs the slug to Redis sites:valid (cache-coherence invariant).")
+  Component(ingest_svc, "IngestService", "NestJS Provider", "assertSiteValid via Redis SISMEMBER (DB fallback only on Redis error); Redis HSETNX dedupe; produce to Kafka; revert dedupe on produce failure.")
+  Component(metrics_svc, "MetricsService", "NestJS Provider", "Reads site row, sums prior-month closed buckets (recomputing stale rows on the fly) + current-month-to-date from measurements; computes compliance via scaled-BigInt decimal math.")
+
+  Component(bootstrap_svc, "BootstrapService", "NestJS Provider", "On boot, warms the Redis sites:valid SET from the sites table.")
+  Component(topic_init, "TopicInit", "Module init", "Ensures ingest.batches topic exists at startup.")
+
+  Component(db_client, "DB_CLIENT", "Drizzle / postgres-js", "Single Drizzle client + pool, exposed via DI token.")
+  Component(redis_client, "REDIS_CLIENT", "ioredis", "Single Redis client with batchDedupe Lua script registered (atomic HSETNX + EXPIRE).")
+  Component(kafka_producer, "KAFKA_PRODUCER", "kafkajs", "Single shared producer.")
+
+  Component(config_svc, "AppConfigService", "Zod-validated env", "Validates DATABASE_URL, REDIS_URL, KAFKA_BROKERS, CORS_ALLOWED_ORIGINS, dedupe TTL, ingest topic name.")
+}
+
+ContainerDb_Ext(postgres, "PostgreSQL")
+ContainerDb_Ext(redis, "Redis")
+ContainerQueue_Ext(kafka, "Kafka")
+
+Rel(client, req_id_mw, "HTTPS")
+Rel(req_id_mw, zod_pipe, "→")
+Rel(zod_pipe, sites_ctl, "→")
+Rel(zod_pipe, ingest_ctl, "→")
+Rel(zod_pipe, metrics_ctl, "→")
+Rel(resp_interceptor, client, "{ ok: true, data }")
+Rel(exc_filter, client, "{ ok: false, error }")
+
+Rel(sites_ctl, sites_svc, "create / list")
+Rel(ingest_ctl, ingest_svc, "ingest(batch)")
+Rel(metrics_ctl, metrics_svc, "getSiteMetrics / listSites")
+Rel(health_ctl, db_client, "ping")
+Rel(health_ctl, redis_client, "ping")
+Rel(health_ctl, kafka_producer, "metadata")
+
+Rel(sites_svc, db_client, "INSERT sites RETURNING")
+Rel(sites_svc, redis_client, "SADD sites:valid (inside tx)")
+
+Rel(ingest_svc, redis_client, "SISMEMBER sites:valid; batchDedupe Lua")
+Rel(ingest_svc, db_client, "Site existence fallback (Redis-down circuit breaker)")
+Rel(ingest_svc, kafka_producer, "produce { topic: ingest.batches, key: site_slug }")
+
+Rel(metrics_svc, db_client, "SELECT sites; aggregate measurements + site_monthly_emissions")
+
+Rel(bootstrap_svc, db_client, "SELECT slug FROM sites")
+Rel(bootstrap_svc, redis_client, "SADD sites:valid …")
+
+Rel(topic_init, kafka, "ensure topic ingest.batches")
+
+Rel(db_client, postgres, "TCP / SQL")
+Rel(redis_client, redis, "RESP")
+Rel(kafka_producer, kafka, "TCP")
+
+SHOW_LEGEND()
+@enduml

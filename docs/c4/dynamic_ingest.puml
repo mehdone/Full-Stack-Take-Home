@@ -1,0 +1,33 @@
+@startuml Dynamic_Ingest
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Sequence.puml
+
+title Dynamic — Successful POST /ingest (happy path)
+
+Person_Ext(device, "Field Device", "Retries with stable batch_id")
+Container(api, "API", "NestJS")
+ContainerDb(redis, "Redis")
+ContainerQueue(kafka, "Kafka", "ingest.batches")
+Container(consumer, "Ingest Consumer", "NestJS standalone")
+ContainerDb(postgres, "PostgreSQL")
+Container(relay, "Outbox Relay")
+Container(alerting, "Alerting Receiver")
+
+Rel(device, api, "1. POST /ingest { batch_id, site_slug, measurements }")
+Rel(api, redis, "2. SISMEMBER sites:valid site_slug")
+Rel(api, redis, "3. batchDedupe Lua (HSETNX + EXPIRE) → first-sight = 1")
+Rel(api, kafka, "4. Produce ingest.batches keyed by site_slug")
+Rel(api, device, "5. 202 { batch_id, status: queued, measurements_received }")
+
+Rel(kafka, consumer, "6. Deliver record")
+Rel(consumer, postgres, "7. Resolve site_id (cache or SELECT)")
+Rel(consumer, postgres, "8. Resolve emission_point ids (cache → SELECT → INSERT ON CONFLICT)")
+Rel(consumer, postgres, "9. BEGIN; INSERT measurements ON CONFLICT DO NOTHING RETURNING")
+Rel(consumer, postgres, "10. UPSERT site_monthly_emissions SET stale=true (per affected month)")
+Rel(consumer, postgres, "11. INSERT outbox (event_type=ingest.batch.persisted); COMMIT")
+
+Rel(relay, postgres, "12. SELECT outbox FOR UPDATE SKIP LOCKED")
+Rel(relay, alerting, "13. POST /alerts/business (X-Idempotency-Key = outbox_id)")
+Rel(relay, postgres, "14. UPDATE outbox SET delivered_at = now()")
+
+SHOW_LEGEND()
+@enduml

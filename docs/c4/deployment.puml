@@ -1,0 +1,58 @@
+@startuml Deployment
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
+
+title Deployment — Local docker-compose (single host)
+
+Deployment_Node(host, "Developer host", "macOS / Linux") {
+
+  Deployment_Node(browser, "Browser", "Chromium/Firefox/Safari") {
+    Container(web_runtime, "Web Dashboard (client)", "Next.js client runtime", "Loaded from emissions_web:3001")
+  }
+
+  Deployment_Node(docker, "Docker Engine", "docker-compose, profile=apps") {
+
+    Deployment_Node(n_web,    "emissions_web",            "Node 22 / Next.js standalone") {
+      Container(web_server, "Next.js server", "RSC + route handlers", "Port 3001")
+    }
+    Deployment_Node(n_api,    "emissions_api",            "Node 22 / NestJS") {
+      Container(api_inst, "API", "Port 3000")
+    }
+    Deployment_Node(n_cons,   "emissions_consumer",       "Node 22 / NestJS standalone") {
+      Container(cons_inst, "Ingest Consumer", "No HTTP port")
+    }
+    Deployment_Node(n_relay,  "emissions_outbox_relay",   "Node 22 / NestJS standalone") {
+      Container(relay_inst, "Outbox Relay", "No HTTP port")
+    }
+    Deployment_Node(n_sys,    "emissions_system_alerts",  "Node 22 / NestJS standalone") {
+      Container(sys_inst, "System-Alerts Relay", "No HTTP port")
+    }
+    Deployment_Node(n_alert,  "emissions_alerting",       "Node 22 / NestJS") {
+      Container(alert_inst, "Alerting Receiver", "Port 4100")
+    }
+
+    Deployment_Node(n_pg,     "emissions_postgres",       "postgres:16-alpine") {
+      ContainerDb(pg_inst, "PostgreSQL", "Port 5432; volume emissions_pg_data")
+    }
+    Deployment_Node(n_redis,  "emissions_redis",          "redis:7.4-alpine") {
+      ContainerDb(redis_inst, "Redis", "Port 6379; AOF + active defrag")
+    }
+    Deployment_Node(n_kafka,  "emissions_kafka",          "apache/kafka:4.2 (KRaft)") {
+      ContainerQueue(kafka_inst, "Kafka", "Internal :9092 / External :9094")
+    }
+  }
+}
+
+Rel(web_runtime, api_inst, "REST", "HTTP :3000 (host loopback)")
+Rel(web_server,  api_inst, "REST (RSC fetches)", "HTTP api:3000 (docker network)")
+Rel(api_inst,    pg_inst,  "SQL", "TCP 5432")
+Rel(api_inst,    redis_inst, "RESP", "TCP 6379")
+Rel(api_inst,    kafka_inst, "Produce", "TCP 9092")
+Rel(cons_inst,   kafka_inst, "Consume", "TCP 9092")
+Rel(cons_inst,   pg_inst,    "SQL", "TCP 5432")
+Rel(relay_inst,  pg_inst,    "SQL", "TCP 5432")
+Rel(relay_inst,  alert_inst, "HTTP", "alerting:4100")
+Rel(sys_inst,    pg_inst,    "SQL", "TCP 5432")
+Rel(sys_inst,    alert_inst, "HTTP", "alerting:4100")
+
+SHOW_LEGEND()
+@enduml

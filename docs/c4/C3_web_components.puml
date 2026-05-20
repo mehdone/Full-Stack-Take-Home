@@ -1,0 +1,44 @@
+@startuml C3_Web_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: Web Dashboard container (apps/web)
+
+Person_Ext(admin, "Operations Admin")
+Container_Ext(api, "API", "REST + JSON")
+
+Container_Boundary(web, "Web Dashboard (Next.js 15 / App Router)") {
+
+  Component(layout, "RootLayout", "Server Component", "Global shell and providers.")
+  Component(home_page, "Sites Page", "Server Component (app/page.tsx)", "Server-fetches the sites list; renders SitesTable.")
+  Component(new_site_page, "Create Site Page", "Client route (app/sites/new)", "Hosts CreateSiteForm.")
+  Component(ingest_page, "Manual Ingest Page", "Client route (app/ingest)", "Hosts IngestForm.")
+
+  Component(sites_table, "SitesTable", "Client Component", "Renders a table of sites with one SiteMetricsRow per row.")
+  Component(metrics_row, "SiteMetricsRow", "Client Component", "Fetches /sites/:slug/metrics and renders totals + ComplianceBadge.")
+  Component(compliance_badge, "ComplianceBadge", "Client Component", "Renders compliant / exceeding pill.")
+  Component(create_site_form, "CreateSiteForm", "Client Component", "Submits POST /sites; surfaces ApiClientError; retry on retryable errors.")
+  Component(ingest_form, "IngestForm", "Client Component", "Generates a stable batch_id (uuid v4) and reuses it on every retry — the front of the idempotency contract.")
+
+  Component(api_client, "apiFetch / lib/api.ts", "TypeScript module", "Single wrapper that prefixes API_BASE_URL, parses the response envelope, validates with shared Zod schemas, throws ApiClientError (retryable on status 0 or ≥500).")
+}
+
+Rel(admin, layout, "Browser")
+Rel(layout, home_page, "/")
+Rel(layout, new_site_page, "/sites/new")
+Rel(layout, ingest_page, "/ingest")
+
+Rel(home_page, sites_table, "renders")
+Rel(sites_table, metrics_row, "renders one per site")
+Rel(metrics_row, compliance_badge, "renders")
+Rel(new_site_page, create_site_form, "renders")
+Rel(ingest_page, ingest_form, "renders")
+
+Rel(home_page, api_client, "getSitesList (server)")
+Rel(metrics_row, api_client, "getSiteMetrics (client)")
+Rel(create_site_form, api_client, "createSite")
+Rel(ingest_form, api_client, "ingestBatch (retries with same batch_id)")
+
+Rel(api_client, api, "HTTPS / JSON (envelope-aware)")
+
+SHOW_LEGEND()
+@enduml

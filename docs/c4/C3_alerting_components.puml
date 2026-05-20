@@ -1,0 +1,29 @@
+@startuml C3_Alerting_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 — Components: Alerting Receiver container (apps/alerting)
+
+Container_Ext(outbox_relay, "Outbox Relay")
+Container_Ext(system_alerts_relay, "System-Alerts Relay")
+
+Container_Boundary(alerting, "Alerting Receiver (NestJS 11)") {
+
+  Component(req_id_mw, "RequestIdMiddleware", "NestJS middleware", "Assigns/propagates X-Request-Id.")
+  Component(alerts_ctl, "AlertsController", "NestJS Controller", "POST /alerts/business; POST /alerts/system. Validates envelopes against shared Zod schemas.")
+  Component(health_ctl, "HealthController", "NestJS Controller", "GET /health.")
+
+  Component(alerts_svc, "AlertsService", "NestJS Provider", "handleBusiness: suppresses no-op batches (measurements_inserted == 0); dedupes by `${event_type}:${payload.batch_id}`; returns 200 in both cases. handleSystem: logs and acknowledges (no dedupe needed).")
+
+  Component(dedup_store, "DedupStore", "Bounded LRU set", "10 000-entry LRU keyed by event_type:batch_id; tolerates relay retries after crash-before-mark.")
+
+  Component(config_svc, "AppConfigService", "Zod-validated env", "PORT and runtime mode.")
+}
+
+Rel(outbox_relay, alerts_ctl, "POST /alerts/business (X-Idempotency-Key = outbox_id)")
+Rel(system_alerts_relay, alerts_ctl, "POST /alerts/system (X-Idempotency-Key = system_alert_id)")
+
+Rel(alerts_ctl, alerts_svc, "handleBusiness / handleSystem")
+Rel(alerts_svc, dedup_store, "add(key) → isNew")
+
+SHOW_LEGEND()
+@enduml

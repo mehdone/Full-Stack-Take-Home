@@ -1,0 +1,18 @@
+@startuml C1_Context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title C1 — System Context: Highwood Emissions Data Platform
+
+Person(admin, "Operations Admin", "Monitors sites, manually ingests readings, retries failures via the dashboard.")
+Person_Ext(device, "Field IoT Device / Sensor", "Emits batches of methane readings; retries on timeout with a stable batch_id.")
+
+System(platform, "Emissions Data Platform", "Ingests, deduplicates, persists and aggregates methane emission readings; serves analytics and triggers alerts.")
+
+System_Ext(alerting_ext, "Alerting Service (downstream)", "Receives business and system alerts. Modelled here as the in-repo HTTP sink that stands in for any external alert pipeline.")
+
+Rel(admin, platform, "Views site totals; submits manual batches; retries failed submissions", "HTTPS")
+Rel(device, platform, "POST /ingest (batches up to 100 readings, retried with stable batch_id)", "HTTPS / JSON")
+Rel(platform, alerting_ext, "POST /alerts/business and /alerts/system (idempotency-keyed, at-least-once)", "HTTP / JSON")
+
+SHOW_LEGEND()
+@enduml

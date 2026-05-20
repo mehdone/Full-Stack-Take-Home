@@ -1,1 +1,2 @@
-console.log("[alerting] placeholder — outbox relay receiver lands in Phase 5");
+// This file is kept for workspace compatibility. The actual entry point is main.ts.
+// See: apps/alerting/src/main.ts

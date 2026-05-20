@@ -40,7 +40,7 @@ import { sites } from "./sites.ts";
 export const measurements = pgTable(
   "measurements",
   {
-    id: bigserial("id", { mode: "bigint" }).notNull(),
+    id: bigserial("id", { mode: "bigint" }).primaryKey(),
     siteId: bigint("site_id", { mode: "bigint" })
       .notNull()
       .references(() => sites.id, { onDelete: "restrict" }),
@@ -52,7 +52,6 @@ export const measurements = pgTable(
     value: numeric("value", { precision: 18, scale: 6 }).notNull(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.id, t.recordedAt], name: "measurements_pkey" }),
     batchPointTimeUnique: uniqueIndex("measurements_batch_point_time_unique").on(
       t.batchId,
       t.emissionPointId,

@@ -18,7 +18,11 @@
     "build": "pnpm -r run build",
     "db:generate": "pnpm --filter @highwood/db run db:generate",
     "db:migrate": "pnpm --filter @highwood/db run db:migrate",
-    "dev": "pnpm infra:up && pnpm db:migrate && pnpm -r --parallel run dev"
+    "dev": "pnpm infra:up && pnpm db:migrate && pnpm -r --parallel run dev",
+    "dev:alerting": "pnpm --filter @highwood/alerting run dev",
+    "dev:outbox-relay": "pnpm --filter @highwood/outbox-relay run dev",
+    "dev:system-alerts": "pnpm --filter @highwood/system-alerts run dev",
+    "test": "pnpm --filter @highwood/api run test"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",

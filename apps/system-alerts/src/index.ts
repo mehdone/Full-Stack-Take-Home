@@ -1,1 +1,2 @@
-console.log("[system-alerts] placeholder — operational-alert delivery worker lands in Phase 5");
+// This file is kept for workspace compatibility. The actual entry point is main.ts.
+// See: apps/system-alerts/src/main.ts

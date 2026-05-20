@@ -5,13 +5,16 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
     }
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "3.23.8"
   }
 }

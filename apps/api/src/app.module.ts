@@ -14,6 +14,7 @@ import { DbModule } from "./db/db.module.ts";
 import { HealthModule } from "./health/health.module.ts";
 import { IngestModule } from "./ingest/ingest.module.ts";
 import { KafkaModule } from "./kafka/kafka.module.ts";
+import { OpenApiModule } from "./openapi/openapi.module.ts";
 import { RedisModule } from "./redis/redis.module.ts";
 import { SitesModule } from "./sites/sites.module.ts";
 
@@ -86,6 +87,7 @@ import { SitesModule } from "./sites/sites.module.ts";
     SitesModule,
     IngestModule,
     BootstrapModule,
+    OpenApiModule,
   ],
   providers: [
     // Globals registered as providers so they apply in every bootstrap context

@@ -14,7 +14,7 @@ Cleaner story: Redis *is* the slug source of truth, full stop. If Redis is down,
 
 The previous implementation did this — it created the site in Postgres and warned if the SADD failed. The argument was "we can recover via `BootstrapService.warmSitesCache` on next boot."
 
-**Rejected because** with the new cache-as-authority policy on the ingest side, a divergence between DB ("site exists") and cache ("not a member") becomes a real bug: `/ingest` returns 404 for a site that absolutely exists. The transaction-with-SADD pattern (§9.3 in MEHDI.md) is the correct fix — a site that can't be advertised in Redis isn't useful and shouldn't be persisted.
+**Rejected because** with the new cache-as-authority policy on the ingest side, a divergence between DB ("site exists") and cache ("not a member") becomes a real bug: `/ingest` returns 404 for a site that absolutely exists. The transaction-with-SADD pattern (§9.3 in ARCHITECTURE.md) is the correct fix — a site that can't be advertised in Redis isn't useful and shouldn't be persisted.
 
 ### 1.3 Polling re-warm of the cache from the DB on a timer
 
@@ -26,7 +26,7 @@ Self-healing for the "Redis lost the set" case: e.g., every 5 minutes, `SELECT s
 
 Eliminates the consumer's `INSERT … ON CONFLICT` for emission-point auto-creation by validating codes against a cached list at the API edge.
 
-**Rejected because** emission points are auto-created on first sight by design — the API doesn't know which codes are valid for a site a priori. Pushing this knowledge to the edge would force operators to pre-declare emission points. The current process-cache-in-consumer pattern (§4.2 in MEHDI.md) is the right place for that hot-path data.
+**Rejected because** emission points are auto-created on first sight by design — the API doesn't know which codes are valid for a site a priori. Pushing this knowledge to the edge would force operators to pre-declare emission points. The current process-cache-in-consumer pattern (§4.2 in ARCHITECTURE.md) is the right place for that hot-path data.
 
 ## 2. Failure modes
 

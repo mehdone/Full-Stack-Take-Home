@@ -224,6 +224,24 @@ services:
         condition: service_healthy
     profiles: ["apps"]
 
+  metrics-relay:
+    container_name: emissions_metrics_relay
+    build:
+      context: .
+      dockerfile: apps/metrics-relay/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-emissions}:${POSTGRES_PASSWORD:-emissions}@postgres:5432/${POSTGRES_DB:-emissions}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["apps"]
+
   system-alerts:
     container_name: emissions_system_alerts
     build:

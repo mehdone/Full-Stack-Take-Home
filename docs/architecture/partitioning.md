@@ -42,7 +42,7 @@ PRIMARY KEY (id, recorded_at)
 UNIQUE (batch_id, emission_point_id, recorded_at)
 ```
 
-This shapes the idempotency story (§6.3 in MEHDI.md). Microsecond `recorded_at` makes same-point-same-instant collisions implausible for physical sensors, so this constraint behaves like a logical `UNIQUE (batch_id, emission_point_id)` in practice while satisfying the partitioning rule.
+This shapes the idempotency story (§6.3 in ARCHITECTURE.md). Microsecond `recorded_at` makes same-point-same-instant collisions implausible for physical sensors, so this constraint behaves like a logical `UNIQUE (batch_id, emission_point_id)` in practice while satisfying the partitioning rule.
 
 ## 4. Monthly rollover
 

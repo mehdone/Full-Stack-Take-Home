@@ -39,7 +39,7 @@ import { sites } from "./sites.ts";
  *
  * This is the deliberate scaling deviation from the README: recomputing
  * `total_emissions_to_date` on every ingest does not scale to 100M+ rows; cached
- * monthly aggregates do. Documented prominently in MEHDI.md.
+ * monthly aggregates do. Documented prominently in ARCHITECTURE.md.
  */
 export const siteMonthlyEmissions = pgTable(
   "site_monthly_emissions",

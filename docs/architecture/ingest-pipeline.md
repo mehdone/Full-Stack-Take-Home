@@ -64,7 +64,7 @@ API short-circuits: `202 { batch_id, status: "queued", stale: true }`. No Kafka 
 SISMEMBER sites:valid <slug>     → 0
 ```
 
-API returns `404 { ok: false, error: { code: "NOT_FOUND", ... } }`. **No DB query.** This is the cache-as-authority boundary (§9 in MEHDI.md).
+API returns `404 { ok: false, error: { code: "NOT_FOUND", ... } }`. **No DB query.** This is the cache-as-authority boundary (§9 in ARCHITECTURE.md).
 
 ### 2.3 Redis down (`SISMEMBER` throws)
 
@@ -80,7 +80,7 @@ KafkaJS retries up to `retry: { retries: 5 }`. With `idempotent: true` + `maxInF
 
 - Redis HSETNX returns 0 → API returns `202 stale: true` even though the original never made it to Kafka.
 
-This is the **consumer-permanent-failure-lockout cousin**: the client thinks the batch was accepted when it wasn't. Mitigation: short TTL on dedupe entries or explicit clear-on-failure (deferred — §6.6 in MEHDI.md).
+This is the **consumer-permanent-failure-lockout cousin**: the client thinks the batch was accepted when it wasn't. Mitigation: short TTL on dedupe entries or explicit clear-on-failure (deferred — §6.6 in ARCHITECTURE.md).
 
 ### 2.5 Consumer crash between DB commit and Kafka offset commit
 
@@ -95,7 +95,7 @@ COMMIT
 Commit Kafka offset
 ```
 
-The outbox carries two rows for this `batch_id`. The relay → alerting receiver dedupes on `batch_id` and suppresses the no-op row (§6.5, §10.4 in MEHDI.md).
+The outbox carries two rows for this `batch_id`. The relay → alerting receiver dedupes on `batch_id` and suppresses the no-op row (§6.5, §10.4 in ARCHITECTURE.md).
 
 ### 2.6 Late arrival into a closed month
 
@@ -103,7 +103,7 @@ The consumer derives each measurement's `(year, month)` in the site's IANA timez
 
 Current-site-local-month measurements **do not** trigger the UPSERT — the current month has no cache row to invalidate (the ETL creates it on month close) and `GET /metrics` reads the current month live from `measurements`. Skipping the no-op write removes WAL exhaustion on the steady-state hot path.
 
-This is what makes monthly aggregates safe under out-of-order arrivals while keeping the steady-state path cheap — see §5.3 in MEHDI.md for the worked example.
+This is what makes monthly aggregates safe under out-of-order arrivals while keeping the steady-state path cheap — see §5.3 in ARCHITECTURE.md for the worked example.
 
 ### 2.7 Clock-skew rejection
 

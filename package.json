@@ -21,6 +21,7 @@
     "dev": "pnpm infra:up && pnpm db:migrate && pnpm -r --parallel run dev",
     "dev:alerting": "pnpm --filter @highwood/alerting run dev",
     "dev:outbox-relay": "pnpm --filter @highwood/outbox-relay run dev",
+    "dev:metrics-relay": "pnpm --filter @highwood/metrics-relay run dev",
     "dev:system-alerts": "pnpm --filter @highwood/system-alerts run dev",
     "test": "pnpm --filter @highwood/api run test"
   },

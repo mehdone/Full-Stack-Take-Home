@@ -97,7 +97,7 @@ When `attempts >= MAX_ATTEMPTS`:
 2. The outbox row's `available_at` is set ~1 year in the future. The row is **frozen, not deleted** — preserved as a forensic audit trail.
 3. The system-alerts relay attempts to deliver the exhaustion event to the alerting receiver.
 
-If the system-alerts relay also fails MAX_ATTEMPTS times, it **does not** write a recursive `system_alerts` row. Instead it logs a structured `system_alerts_exhausted` event and freezes the system_alerts row. This breaks the recursive-failure loop (§10.3 in MEHDI.md).
+If the system-alerts relay also fails MAX_ATTEMPTS times, it **does not** write a recursive `system_alerts` row. Instead it logs a structured `system_alerts_exhausted` event and freezes the system_alerts row. This breaks the recursive-failure loop (§10.3 in ARCHITECTURE.md).
 
 ## 5. Manual recovery
 
